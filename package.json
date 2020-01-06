@@ -1,0 +1,18 @@
+{
+  "name": "jage",
+  "version": "0.1.0",
+  "description": "age encryption tool implementation in JavaScript",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Paul Miller (https://paulmillr.com)",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^4.0.1",
+    "fast-sha256": "github:paulmillr/fast-sha256-js",
+    "is-chacha20-poly1305-supported": "1.0.0",
+    "scrypt-async": "^2.0.1"
+  }
+}
