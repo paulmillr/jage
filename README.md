@@ -2,6 +2,8 @@
 
 [age-encryption.org](https://age-encryption.org) tool implementation in JavaScript.
 
+This is a modern replacement for GPG.
+
 ## Spec
 
 See the latest spec at https://gist.github.com/paulmillr/9c80bb176ee039272ab5c915d3c73afc.
