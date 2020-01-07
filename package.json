@@ -10,9 +10,14 @@
   "author": "Paul Miller (https://paulmillr.com)",
   "license": "MIT",
   "dependencies": {
+    "@stablelib/x25519": "0.7.5",
     "commander": "4.0.1",
     "fast-sha256": "1.2.0",
     "is-chacha20-poly1305-supported": "1.0.0",
+    "noble-ed25519": "0.3.2",
     "scrypt-async": "2.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "13.1.4"
   }
 }
