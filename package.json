@@ -17,9 +17,9 @@
     "is-chacha20-poly1305-supported": "1.0.0",
     "noble-ed25519": "0.3.2",
     "scrypt-async": "2.0.1",
-    "typescript": "^3.7.4"
+    "typescript": "^3.7.5"
   },
   "devDependencies": {
-    "@types/node": "13.1.4"
+    "@types/node": "13.5.0"
   }
 }
