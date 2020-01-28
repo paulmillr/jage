@@ -2,12 +2,15 @@ import * as cryp from 'crypto';
 import * as sha256 from 'fast-sha256';
 import * as ed25519 from 'noble-ed25519';
 import * as x25519 from '@stablelib/x25519';
+import { ChaCha20Poly1305, STREAM } from './stream';
 const bech32 = require('bech32');
 const escrypt = require('scrypt-async');
 
 const isBrowser = typeof window == "object" && "crypto" in window;
 
 type ui8a = Uint8Array;
+
+const {encrypt, decrypt} = ChaCha20Poly1305;
 
 function toHex(ui8a: ui8a): string {
   return Array.from(ui8a)
@@ -23,10 +26,14 @@ function stringToArray(str: string): ui8a {
   return (new TextEncoder()).encode(str);
 }
 
-function concatArrays(arr1: Uint8Array, arr2: Uint8Array) {
-  const result = new Uint8Array(arr1.length + arr2.length);
-  result.set(arr1);
-  result.set(arr2, arr1.length);
+function concatArrays(...arrays: ui8a[]) {
+  const length = arrays.reduce((sum, a) => sum + a.length, 0);
+  const result = new Uint8Array(length);
+  let prevLength = 0;
+  for (let arr of arrays) {
+    result.set(arr, prevLength);
+    prevLength += arr.length;
+  }
   return result;
 }
 
@@ -64,9 +71,12 @@ function getHeader() {
   const headerEnd = ``
 }
 
-function getBody(fileKey: ui8a) {
+function getBody(fileKey: ui8a, plaintext: ui8a) {
   const nonce = random(16);
   const hkdf = HKDF(nonce, stringToArray('payload'), fileKey);
+  const sealed = STREAM.seal(plaintext, hkdf);
+  const body = concatArrays(nonce, sealed);
+  return body;
 }
 
 // TODO: is this canonical?
@@ -74,30 +84,6 @@ function getBody(fileKey: ui8a) {
 export function encode(data: string | ui8a) {
   const buf = data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(data, 'hex');
   return buf.toString('base64');
-}
-
-// ChaCha20-Poly1305 from RFC 7539 with a zero nonce.
-// todo: browser version
-export function encrypt(key: ui8a, plaintext: ui8a) {
-  const iv = Uint8Array.from([0]);
-  const cipher = cryp.createCipheriv('chacha20-poly1305', key, iv, {authTagLength: 12});
-
-  // ?
-  // cipher.setAAD(aad, { plaintextLength: plaintext.length });
-
-  const head = cipher.update(plaintext);
-  const final = cipher.final();
-  const ciphertext = Buffer.concat([head, final]);
-  return ciphertext;
-  // const tag = cipher.getAuthTag();
-}
-
-export function decrypt(key: ui8a, ciphertext: ui8a) {
-  const iv = Uint8Array.from([0]);
-  const decipher = cryp.createDecipheriv('chacha20-poly1305', key, iv, {authTagLength: 12});
-  const plaintext = decipher.update(ciphertext);
-  const res = Buffer.concat([plaintext, decipher.final()]);
-  return Uint8Array.from(res);
 }
 
 // Required: RFC 7748, including the all-zeroes output check

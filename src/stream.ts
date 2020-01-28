@@ -11,13 +11,13 @@
 import * as cryp from 'crypto';
 
 const CHUNK_SIZE = 64 * 1024; // 64 KiB
-const TAG_SIZE = 16; // chacha20-poly1305 MAC size
+const TAG_SIZE = 16; // Poly1305 MAC size
 const ENCRYPTED_CHUNK_SIZE = CHUNK_SIZE + TAG_SIZE;
 const NONCE_SIZE = 11; // STREAM nonce size
 
 type ui8a = Uint8Array;
 
-class STREAM {
+export class STREAM {
   static seal(plaintext: ui8a, privateKey: ui8a) {
     const stream = new STREAM(privateKey);
     const chunks = Math.ceil(plaintext.length / CHUNK_SIZE);
@@ -122,8 +122,8 @@ class STREAM {
 
 // ChaCha20-Poly1305 from RFC 7539.
 const CHACHA_NAME = 'chacha20-poly1305';
-class ChaCha20Poly1305 {
-  static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a): ui8a {
+export class ChaCha20Poly1305 {
+  static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a = new Uint8Array(12)): ui8a {
     const cipher = cryp.createCipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
     const head = cipher.update(plaintext);
     const final = cipher.final();
@@ -132,7 +132,7 @@ class ChaCha20Poly1305 {
     return new Uint8Array(ciphertext);
   }
 
-  static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a): ui8a {
+  static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a = new Uint8Array(12)): ui8a {
     const decipher = cryp.createDecipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
     const tag = ciphertext.slice(0, TAG_SIZE);
     decipher.setAuthTag(tag);
@@ -143,10 +143,12 @@ class ChaCha20Poly1305 {
   }
 }
 
-const plaintext = new Uint8Array(22).fill(2);
-const key = new Uint8Array(32).fill(1);
-const sealed = STREAM.seal(plaintext, key);
-// To test poly1305.
-// sealed[0] = 1;
-const opened = STREAM.open(sealed, key);
-console.log('finished', {plaintext, sealed, opened});
+function test() {
+  const plaintext = new Uint8Array(22).fill(2);
+  const key = new Uint8Array(32).fill(1);
+  const sealed = STREAM.seal(plaintext, key);
+  // To test poly1305.
+  // sealed[0] = 1;
+  const opened = STREAM.open(sealed, key);
+  console.log('finished', {plaintext, sealed, opened});
+}
