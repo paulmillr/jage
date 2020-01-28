@@ -11,7 +11,7 @@
 import * as cryp from 'crypto';
 
 const CHUNK_SIZE = 64 * 1024; // 64 KiB
-const TAG_SIZE = 12; // chacha20-poly1305 MAC size
+const TAG_SIZE = 16; // chacha20-poly1305 MAC size
 const ENCRYPTED_CHUNK_SIZE = CHUNK_SIZE + TAG_SIZE;
 const NONCE_SIZE = 11; // STREAM nonce size
 
@@ -19,8 +19,6 @@ type ui8a = Uint8Array;
 
 class STREAM {
   static seal(plaintext: ui8a, privateKey: ui8a) {
-    // const plaintext = new Uint8Array(128 * 1024);
-    // const privateKey = new Uint8Array(32);
     const stream = new STREAM(privateKey);
     const chunks = Math.ceil(plaintext.length / CHUNK_SIZE);
     const ciphertext = new Uint8Array(plaintext.length + (chunks * TAG_SIZE));
@@ -37,12 +35,29 @@ class STREAM {
     return ciphertext;
   }
 
+  static open(ciphertext: ui8a, privateKey: ui8a) {
+    const stream = new STREAM(privateKey);
+    const chunks = Math.ceil(ciphertext.length / ENCRYPTED_CHUNK_SIZE);
+    const plaintext = new Uint8Array(ciphertext.length - (chunks * TAG_SIZE));
+
+    for (let chunk64kb = 1; chunk64kb <= chunks; chunk64kb++) {
+      let start = chunk64kb - 1;
+      let end = chunk64kb;
+      const isLast = chunk64kb === chunks;
+      const input = ciphertext.slice(start * ENCRYPTED_CHUNK_SIZE, end * ENCRYPTED_CHUNK_SIZE);
+      const output = plaintext.subarray(start * CHUNK_SIZE, end * CHUNK_SIZE);
+      stream.decryptChunk(input, isLast, output);
+    }
+    stream.clear();
+    return plaintext;
+  }
+
   key: ui8a;
   nonce: ui8a;
   nonceView: DataView;
   counter: number;
   constructor(key: ui8a) {
-    this.key = key;
+    this.key = key.slice();
     this.nonce = new Uint8Array(NONCE_SIZE + 1);
     this.nonceView = new DataView(this.nonce.buffer);
     this.counter = 0;
@@ -109,21 +124,29 @@ class STREAM {
 const CHACHA_NAME = 'chacha20-poly1305';
 class ChaCha20Poly1305 {
   static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a): ui8a {
-    const cipher = cryp.createCipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: 12});
+    const cipher = cryp.createCipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
     const head = cipher.update(plaintext);
     const final = cipher.final();
-    const auth = cipher.getAuthTag();
-    const ciphertext = Buffer.concat([head, final, auth]);
+    const tag = cipher.getAuthTag();
+    const ciphertext = Buffer.concat([tag, head, final]);
     return new Uint8Array(ciphertext);
   }
 
   static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a): ui8a {
-    const decipher = cryp.createDecipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: 12});
-    const plaintext = decipher.update(ciphertext);
-    const res = Buffer.concat([plaintext, decipher.final()]);
+    const decipher = cryp.createDecipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
+    const tag = ciphertext.slice(0, TAG_SIZE);
+    decipher.setAuthTag(tag);
+    const plaintext = decipher.update(ciphertext.slice(TAG_SIZE));
+    const final = decipher.final();
+    const res = Buffer.concat([plaintext, final]);
     return new Uint8Array(res);
   }
 }
 
-const out = STREAM.seal(new Uint8Array(22).fill(2), new Uint8Array(32).fill(1));
-console.log('finished', out);
+const plaintext = new Uint8Array(22).fill(2);
+const key = new Uint8Array(32).fill(1);
+const sealed = STREAM.seal(plaintext, key);
+// To test poly1305.
+// sealed[0] = 1;
+const opened = STREAM.open(sealed, key);
+console.log('finished', {plaintext, sealed, opened});
