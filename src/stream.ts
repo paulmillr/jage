@@ -3,26 +3,17 @@
 // There are NO js libraries right now.
 // miscreant.js implements STREAM, but it doesn't support chacha
 // https://github.com/miscreant/miscreant.js
+// TODO: browser version
 //
 // age spec:
 // After the header the binary payload is nonce || STREAM[HKDF[nonce, "payload"](file key)](plaintext) where nonce is random(16) and STREAM is from Online Authenticated-Encryption and its Nonce-Reuse Misuse-Resistance with ChaCha20-Poly1305 in 64KiB chunks and a nonce structure of 11 bytes of big endian counter, and 1 byte of last block flag (0x00 / 0x01). (The STREAM scheme is similar to the one Tink and Miscreant use, but without nonce prefix as we use HKDF, and with ChaCha20-Poly1305 instead of AES-GCM because the latter is unreasonably hard to do well or fast without hardware support.)
 
 import * as cryp from 'crypto';
-// ChaCha20-Poly1305 from RFC 7539 with a zero nonce.
-// todo: browser version
 
 const CHUNK_SIZE = 64 * 1024; // 64 KiB
-const TAG_SIZE = 12;
+const TAG_SIZE = 12; // chacha20-poly1305 MAC size
 const ENCRYPTED_CHUNK_SIZE = CHUNK_SIZE + TAG_SIZE;
-const NONCE_SIZE = 11; /** Size of a nonce required by STREAM in bytes + last block */
-const LAST_BLOCK_FLAG = 1; /** Byte flag: last block in the STREAM? yes=1, no=0 */
-const COUNTER_MAX = 0xFFFFFFFFFFF0; /** Max value of the counter STREAM uses internally to identify messages */
-
-export interface IAEADLike {
-  seal(plaintext: Uint8Array, nonce: Uint8Array, associatedData: Uint8Array): Promise<Uint8Array>;
-  open(ciphertext: Uint8Array, nonce: Uint8Array, associatedData: Uint8Array): Promise<Uint8Array>;
-  clear(): this;
-}
+const NONCE_SIZE = 11; // STREAM nonce size
 
 type ui8a = Uint8Array;
 
@@ -103,7 +94,7 @@ class STREAM {
   }
 
   clear() {
-    function clear(arr: Uint8Array) {
+    function clear(arr: ui8a) {
       for (let i = 0; i < arr.length; i++) {
         arr[i] = 0;
       }
@@ -114,23 +105,20 @@ class STREAM {
   }
 }
 
-const CIPHER_NAME = 'chacha20-poly1305';
+// ChaCha20-Poly1305 from RFC 7539.
+const CHACHA_NAME = 'chacha20-poly1305';
 class ChaCha20Poly1305 {
   static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a): ui8a {
-    const cipher = cryp.createCipheriv(CIPHER_NAME, privateKey, nonce, {authTagLength: 12});
-    // if (associatedData) cipher.setAAD(associatedData, {plaintextLength: plaintext.length});
+    const cipher = cryp.createCipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: 12});
     const head = cipher.update(plaintext);
     const final = cipher.final();
     const auth = cipher.getAuthTag();
     const ciphertext = Buffer.concat([head, final, auth]);
-    // console.log(123, new Uint8Array(ciphertext))
-    // console.log(123, ciphertext, ciphertext.buffer, new Uint8Array(ciphertext.buffer));
     return new Uint8Array(ciphertext);
   }
 
   static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a): ui8a {
-    const decipher = cryp.createDecipheriv(CIPHER_NAME, privateKey, nonce, {authTagLength: 12});
-    // if (associatedData) decipher.setAAD(associatedData);
+    const decipher = cryp.createDecipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: 12});
     const plaintext = decipher.update(ciphertext);
     const res = Buffer.concat([plaintext, decipher.final()]);
     return new Uint8Array(res);
