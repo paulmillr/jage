@@ -1,16 +1,11 @@
-import * as cryp from 'crypto';
-import * as sha256 from 'fast-sha256';
-import * as ed25519 from 'noble-ed25519';
 import * as x25519 from '@stablelib/x25519';
-import { ChaCha20Poly1305, STREAM } from './stream';
+import { HKDF, HMAC, X25519, encode, scrypt, random } from './primitives';
+import { ChaCha20Poly1305 as chacha, STREAM } from './stream';
+import { writeFileSync } from 'fs';
+import * as sha256 from 'fast-sha256';
 const bech32 = require('bech32');
-const escrypt = require('scrypt-async');
-
-const isBrowser = typeof window == "object" && "crypto" in window;
 
 type ui8a = Uint8Array;
-
-const {encrypt, decrypt} = ChaCha20Poly1305;
 
 function toHex(ui8a: ui8a): string {
   return Array.from(ui8a)
@@ -22,8 +17,12 @@ function bech32ToArray(str: string): ui8a {
   return bech32.fromWords(bech32.decode(str).words);
 }
 
-function stringToArray(str: string): ui8a {
+function utfToArray(str: string): ui8a {
   return (new TextEncoder()).encode(str);
+}
+
+function arrayToUtf(ui8a: ui8a): string {
+  return new TextDecoder().decode(ui8a);
 }
 
 function concatArrays(...arrays: ui8a[]) {
@@ -42,94 +41,99 @@ const recipientLine = {
   // encode(encrypt[HKDF[salt, label](X25519(ephemeral secret, public key))](file key))
   X25519(publicKey: ui8a, fileKey: ui8a): string {
     const label = 'age-encryption.org/v1/X25519';
-    const labelBytes = stringToArray(label);
+    const labelBytes = utfToArray(label);
     const secret = random(32);
     const secretPoint = x25519.scalarMultBase(secret);
-    const diffieHellman = x25519.sharedKey(secret, publicKey);
+    const diffieHellman = x25519.sharedKey(secret, publicKey); // or primitives.X25519?
 
     const hkdf = HKDF(secretPoint, labelBytes, diffieHellman);
     return `-> X25519 ${encode(secretPoint)}
-  ${encode(encrypt(hkdf, fileKey))}`;
+  ${encode(chacha.encrypt(hkdf, fileKey))}`;
   },
 
   // -> scrypt encode(salt) log2(N)
   // encode(encrypt[scrypt["age-encryption.org/v1/scrypt" + salt, N](password)](file key))
-  scrypt(password: ui8a, N: number, fileKey: ui8a): string {
+  scrypt(password: ui8a, factor: number, fileKey: ui8a): string {
+    const label = 'age-encryption.org/v1/scrypt/';
     const salt = random(32);
-    const fullSalt = concatArrays(stringToArray(`age-encryption.org/v1/scrypt/`), salt);
-    const key = scrypt(fullSalt, N, password);
+    const fullLabel = concatArrays(utfToArray(label), salt);
+    const N = Math.pow(2, factor);
+    const key = scrypt(fullLabel, N, password);
 
     return `-> scrypt ${encode(salt)} ${N}
-${encode(encrypt(key, fileKey))}`;
-  }
+${encode(chacha.encrypt(key, fileKey))}`;
+  },
+
+  // -> ssh-ed25519 tag encode(X25519(ephemeral secret, basepoint))
+  // encode(encrypt[HKDF[salt, label](X25519(ephemeral secret, tweaked key))](file key))
+  // "ssh-ed25519"(password: ui8a, fileKey: ui8a): string {
+  //   const secret = random(32);
+  //   // X25519(ephemeral secret, basepoint) || converted key;
+  //   const salt = x25519.scalarMultBase(secret);
+  //   const label = 'age-encryption.org/v1/ssh-ed25519';
+  //   const ssh =
+  //   const hashed = sha256.hash().slice(0, 4);
+  //   const tag = encode(); // tag is encode(SHA-256(SSH key)[:4]),
+  //   return "";
+  // }
 };
 
-function getHeader() {
-  const label = `age-encryption.org/v1`;
-  // const header = construct();
-  // — encode(HMAC[HKDF["", "header"](file key)](header))
-  const headerEnd = ``
+type RecipientType = keyof typeof recipientLine;
+type RecipientFn = typeof recipientLine[RecipientType];
+
+// Example usage:
+//   constructHeader(["X25519", publicKey, fileKey], ["scrypt", password, N, fileKey])
+function getRecipients(algorithms: any[]): string[] {
+  return algorithms.map(params => {
+    const type: RecipientType = params[0];
+    const args: any[] = params.slice(1);
+    const generator: RecipientFn = recipientLine[type];
+    // @ts-ignore
+    const text = generator(...args);
+    return text;
+  });
 }
 
+function getFileKey() {
+  return random(16);
+}
+
+// The header ends with the following line
+// --- encode(HMAC[HKDF["", "header"](file key)](header))
+// where header is the whole header up to the --- mark included. (To add a recipient, the master key
+// needs to be available anyway, so it can be used to regenerate the HMAC. Removing a recipient
+// without access to the key is not possible.)
+function getHeader(fileKey: ui8a, algorithms: any[]) {
+  const label = 'age-encryption.org/v1';
+  const headerEndLabel = 'header';
+  const recipients = getRecipients(algorithms).join('\n');
+  const header = `${label}\n${recipients}`;
+  const hkdf = HKDF(new Uint8Array(0), utfToArray(headerEndLabel), fileKey);
+  const hmac = HMAC(hkdf, utfToArray(header));
+  return `${header}
+--- ${encode(hmac)}`;
+}
+
+// After the header the binary payload is nonce || STREAM[HKDF[nonce, "payload"](file key)]
+// (plaintext) where nonce is random(16) and STREAM is from Online Authenticated-Encryption and its
+// Nonce-Reuse Misuse-Resistance with ChaCha20-Poly1305 in 64KiB chunks.
 function getBody(fileKey: ui8a, plaintext: ui8a) {
+  const label = 'payload';
   const nonce = random(16);
-  const hkdf = HKDF(nonce, stringToArray('payload'), fileKey);
+  const hkdf = HKDF(nonce, utfToArray(label), fileKey);
   const sealed = STREAM.seal(plaintext, hkdf);
-  const body = concatArrays(nonce, sealed);
-  return body;
+  return `${arrayToUtf(nonce)}${arrayToUtf(sealed)}`;
 }
 
-// TODO: is this canonical?
-// canonical base64 from RFC 4648 without padding.
-export function encode(data: string | ui8a) {
-  const buf = data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(data, 'hex');
-  return buf.toString('base64');
+export function encrypt(plaintext: ui8a) {
+  const fileKey = getFileKey();
+  // TODO: pass only from getHeader.
+  const header = getHeader(fileKey, [["scrypt", utfToArray("password"), 14, fileKey]]);
+  const body = getBody(fileKey, plaintext);
+  const ageText = `${header}\n${body}`;
+  return ageText;
 }
 
-// Required: RFC 7748, including the all-zeroes output check
-export function X25519(secret: ui8a, point: ui8a): ui8a {
-  return x25519.sharedKey(secret, point, true);
-}
+export function decrypt(ageText: ui8a) {
 
-// 32 bytes of HKDF from RFC 5869 with SHA-256
-export function HKDF(salt: ui8a, label: ui8a, key: ui8a): ui8a {
-  return sha256.hkdf(key, salt, label);
-}
-
-// RFC 2104 with SHA-256
-export function HMAC(key: ui8a, message: ui8a): ui8a {
-  return sha256.hmac(key, message);
-}
-
-// Required: 32 bytes of scrypt from RFC 7914 with r = 8 and P = 1
-export function scrypt(salt: ui8a, N: number, password: ui8a): ui8a {
-  let res: ui8a = undefined as any;
-  escrypt(password, salt, {N: N, r: 8, p: 1, dkLen: 32, encoding: 'binary'}, (key: ui8a) => { res = key });
-  return res;
-}
-
-// Optional: RFC 8017 with SHA-256 and MGF1
-// function RSAES_OAEP(key, label, plaintext) { }
-
-// random(n) is a string of n bytes read from a CSPRNG like /dev/urandom.
-export function random(n: number): ui8a {
-  if (isBrowser) {
-    const array = new Uint8Array(n);
-    window.crypto.getRandomValues(array);
-    return array;
-  } else {
-    const b = cryp.randomBytes(n);
-    return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
-  }
-}
-
-function testEncryptDecrypt() {
-  const assert = require('assert');
-  const key = scrypt(random(10), 16, random(10));
-  const plain = random(20);
-  console.log('encrypting', {key, plain});
-  const cipher = encrypt(key, plain);
-  const deciphered = decrypt(key, cipher);
-  console.log('decrypted', {deciphered})
-  assert.equal(deciphered, plain);
 }

@@ -122,8 +122,9 @@ export class STREAM {
 
 // ChaCha20-Poly1305 from RFC 7539.
 const CHACHA_NAME = 'chacha20-poly1305';
+const CNS = 12; // chacha nonce size
 export class ChaCha20Poly1305 {
-  static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a = new Uint8Array(12)): ui8a {
+  static encrypt(privateKey: ui8a, plaintext: ui8a, nonce: ui8a = new Uint8Array(CNS)): ui8a {
     const cipher = cryp.createCipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
     const head = cipher.update(plaintext);
     const final = cipher.final();
@@ -132,8 +133,9 @@ export class ChaCha20Poly1305 {
     return new Uint8Array(ciphertext);
   }
 
-  static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a = new Uint8Array(12)): ui8a {
+  static decrypt(privateKey: ui8a, ciphertext: ui8a, nonce: ui8a = new Uint8Array(CNS)): ui8a {
     const decipher = cryp.createDecipheriv(CHACHA_NAME, privateKey, nonce, {authTagLength: TAG_SIZE});
+    // Tag is first 16 bytes. The other part is ciphertext.
     const tag = ciphertext.slice(0, TAG_SIZE);
     decipher.setAuthTag(tag);
     const plaintext = decipher.update(ciphertext.slice(TAG_SIZE));
@@ -152,3 +154,4 @@ function test() {
   const opened = STREAM.open(sealed, key);
   console.log('finished', {plaintext, sealed, opened});
 }
+
