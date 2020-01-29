@@ -14,6 +14,11 @@ export function encode(data: string | ui8a) {
   return str;
 }
 
+export function decode(data: string | ui8a) {
+  const bytes = data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(data, 'hex');
+  return new Uint8Array()
+}
+
 // RFC 7748, including the all-zeroes output check
 export function X25519(secret: ui8a, point: ui8a): ui8a {
   return x25519.sharedKey(secret, point, true);

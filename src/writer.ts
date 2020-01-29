@@ -68,7 +68,7 @@ export function recipients(algorithms: any[]): string[] {
 }
 
 // File key is random data, it's encrypted with SSH key / scrypt password or so.
-function getFileKey() {
+function getFileKey(): ui8a {
   return random(16);
 }
 
@@ -77,7 +77,7 @@ function getFileKey() {
 // where header is the whole header up to the --- mark included. (To add a recipient, the master key
 // needs to be available anyway, so it can be used to regenerate the HMAC. Removing a recipient
 // without access to the key is not possible.)
-function header(fileKey: ui8a, algorithms: any[]) {
+function header(fileKey: ui8a, algorithms: any[]): string {
   const rec = recipients(algorithms).join('\n');
   const hdr = `${labels.start}\n${rec}`;
   const hkdf = HKDF(new Uint8Array(0), utfToArray(labels.headerEnd), fileKey);
@@ -89,17 +89,21 @@ function header(fileKey: ui8a, algorithms: any[]) {
 // After the header the binary payload is nonce || STREAM[HKDF[nonce, "payload"](file key)]
 // (plaintext) where nonce is random(16) and STREAM is from Online Authenticated-Encryption and its
 // Nonce-Reuse Misuse-Resistance with ChaCha20-Poly1305 in 64KiB chunks.
-function body(fileKey: ui8a, plaintext: ui8a) {
+function body(fileKey: ui8a, plaintext: ui8a): string {
   const nonce = random(16);
   const hkdf = HKDF(nonce, utfToArray(labels.body), fileKey);
   const sealed = STREAM.seal(plaintext, hkdf);
   return `${arrayToUtf(nonce)}${arrayToUtf(sealed)}`;
 }
 
-export function encrypt(plaintext: ui8a) {
+export function encrypt(plaintext: ui8a, params: any[]): string {
   const fileKey = getFileKey();
   // TODO: pass only from getHeader.
-  const hdr = header(fileKey, [["scrypt", utfToArray("password"), 14, fileKey]]);
+  const hdr = header(fileKey, params);
   const bdy = body(fileKey, plaintext);
   return `${hdr}\n${bdy}`;
 }
+
+const plaintext = new Uint8Array(256);
+const fileKey = new Uint8Array(32);
+encrypt(plaintext, [["scrypt", utfToArray("password"), 14, fileKey]]);

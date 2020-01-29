@@ -1,4 +1,35 @@
-import { labels, ui8a } from './utils';
+import { labels, ui8a, concatArrays, utfToArray, arrayToUtf } from './utils';
+import { STREAM, ChaCha20Poly1305 as chacha } from './stream';
+import { HKDF, scrypt, decode } from './primitives';
+
+const recipientTypes = {
+  // -> X25519 encode(X25519(ephemeral secret, basepoint))
+  // encode(encrypt[HKDF[salt, label](X25519(ephemeral secret, public key))](file key))
+  X25519(encodedSecret: string, encryptedKey: string): ui8a {
+  //   const labelBytes = utfToArray(labels.X25519);
+  //   const secret = random(32);
+  //   const secretPoint = x25519.scalarMultBase(secret);
+  //   const diffieHellman = x25519.sharedKey(secret, publicKey); // or primitives.X25519?
+
+  //   const hkdf = HKDF(secretPoint, labelBytes, diffieHellman);
+  //   return `-> X25519 ${encode(secretPoint)}
+  // ${encode(chacha.encrypt(hkdf, fileKey))}`;
+    return new Uint8Array;
+  },
+
+  // -> scrypt encode(salt) log2(N)
+  // encode(encrypt[scrypt["age-encryption.org/v1/scrypt" + salt, N](password)](file key))
+  scrypt(password: ui8a, encodedSalt: string, factor: string, encodedKey: string): ui8a {
+    const salt = decode(encodedSalt);
+    const N = Math.pow(2, Number.parseInt(factor));
+    const encryptedKey = decode(encodedKey);
+    const fullLabel = concatArrays(utfToArray(labels.scrypt), salt);
+    scrypt(fullLabel, N, password);
+    const key = scrypt(fullLabel, N, password);
+    const fileKey = chacha.decrypt(key, encryptedKey);
+    return fileKey;
+  },
+}
 
 function header(hdrr: ui8a) {
   // const hdr = arrayToUtf(hdrr);
@@ -31,6 +62,10 @@ Bbtnl6veSZhZmG7uXGQUX0hJbrC8mxDkL3zW06tqlWY
   return {mac, recipients};
 }
 
-function body(body: ui8a) {
-  body.slice(0)
+const NONCE_SIZE = 12;
+function body(body: ui8a, fileKey: ui8a) {
+  const nonce = body.slice(0, NONCE_SIZE);
+  const ciphertext = body.slice(NONCE_SIZE);
+  const hkdf = HKDF(nonce, utfToArray(labels.body), fileKey);
+  return STREAM.open(ciphertext, hkdf);
 }
